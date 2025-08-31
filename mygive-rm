@@ -1,0 +1,45 @@
+#!/bin/dash
+
+# mygive-rm - Removes an assignment and all its data
+# Deletes assignment directory and reports if no assignments remain
+# Usage: mygive-rm <assignment>
+# where <assignment> is the assignment name to remove
+
+program_name=$(basename "$0")
+
+# Validate command line arguments
+if [ $# -ne 1 ]; then
+    echo "usage: $program_name <assignment>" >&2
+    exit 1
+fi
+
+assignment="$1"
+
+# Validate assignment name format
+if ! echo "$assignment" | grep -q '^[a-z][a-zA-Z0-9_]*$'; then
+    echo "$program_name: invalid assignment: $assignment" >&2
+    exit 1
+fi
+
+# Check if mygive system exists
+if [ ! -d ".mygive" ]; then
+    echo "$program_name: assignment $assignment not found" >&2
+    exit 1
+fi
+
+# Check if the specified assignment exists
+if [ ! -d ".mygive/$assignment" ]; then
+    echo "$program_name: assignment $assignment not found" >&2
+    exit 1
+fi
+
+# Remove the entire assignment directory and its contents
+rm -rf ".mygive/$assignment"
+echo "assignment $assignment removed"
+
+# Check if any assignments remain in the system
+remaining_assignments=$(find .mygive -mindepth 1 -maxdepth 1 -type d | wc -l)
+
+if [ "$remaining_assignments" -eq 0 ]; then
+    echo "no assignments"
+fi

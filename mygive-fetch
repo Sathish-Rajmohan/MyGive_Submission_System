@@ -1,0 +1,97 @@
+#!/bin/dash
+
+# mygive-fetch - Retrieves and displays a student's submission
+# Outputs the contents of a specific submission (default: most recent)
+# Usage: mygive-fetch <assignment> <zid> [n]
+# where <assignment> is the assignment name, <zid> is the student ID,
+# and [n] is the submission number (optional, defaults to most recent)
+
+program_name=$(basename "$0")
+
+# Validate command line arguments
+if [ $# -lt 2 ] || [ $# -gt 3 ]; then
+    echo "usage: $program_name <assignment> <zid> [n]" >&2
+    exit 1
+fi
+
+assignment="$1"
+zid="$2"
+submission_num="$3"
+
+# Validate assignment name format
+if ! echo "$assignment" | grep -q '^[a-z][a-zA-Z0-9_]*$'; then
+    echo "$program_name: invalid assignment: $assignment" >&2
+    exit 1
+fi
+
+# Validate student ID format (z followed by 7 digits)
+if ! echo "$zid" | grep -q '^z[0-9]\{7\}$'; then
+    echo "$program_name: invalid zid: $zid" >&2
+    exit 1
+fi
+
+# Check if mygive system exists
+if [ ! -d ".mygive" ]; then
+    echo "$program_name: assignment $assignment not found" >&2
+    exit 1
+fi
+
+# Check if the specified assignment exists
+if [ ! -d ".mygive/$assignment" ]; then
+    echo "$program_name: assignment $assignment not found" >&2
+    exit 1
+fi
+
+# Check if student has any submissions
+student_dir=".mygive/$assignment/submissions/$zid"
+if [ ! -d "$student_dir" ] || [ ! -f "$student_dir/count" ]; then
+    echo "$program_name: no submissions for $zid in assignment $assignment" >&2
+    exit 1
+fi
+
+# Get total number of submissions for this student
+total_submissions=$(cat "$student_dir/count")
+
+# Determine which submission to retrieve
+if [ -z "$submission_num" ]; then
+    # No submission number provided, get the most recent one
+    target_submission=$total_submissions
+else
+    # Validate submission number is an integer
+    case "$submission_num" in
+        ''|*[!0-9-]*) 
+            echo "$program_name: invalid submission number: $submission_num" >&2
+            exit 1
+            ;;
+    esac
+
+    # Handle different submission number formats
+    if [ "$submission_num" -le 0 ]; then
+        # Negative numbers or zero count backward from the end
+        target_submission=$((total_submissions + submission_num))
+    else
+        # Positive numbers count from the beginning
+        target_submission=$submission_num
+    fi
+fi
+
+# Special case: 0 means the last submission
+if [ "$submission_num" = "0" ]; then
+    target_submission=$total_submissions
+fi
+
+# Validate the target submission number is in range
+if [ "$target_submission" -lt 1 ] || [ "$target_submission" -gt "$total_submissions" ]; then
+    echo "$program_name: submission $submission_num not found for $assignment" >&2
+    exit 1
+fi
+
+# Check if the submission file actually exists
+submission_file="$student_dir/submission_$target_submission"
+if [ ! -f "$submission_file" ]; then
+    echo "$program_name: submission $submission_num not found for $assignment" >&2
+    exit 1
+fi
+
+# Display the submission content
+cat "$submission_file"

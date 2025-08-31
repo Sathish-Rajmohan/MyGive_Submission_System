@@ -1,0 +1,83 @@
+#!/bin/dash
+
+# mygive-add - Creates a new assignment with test files
+# Creates directory structure and extracts test archive
+# Usage: mygive-add <assignment> <tests>
+# where <assignment> is the assignment name and <tests> is the tar archive of test files
+
+program_name=$(basename "$0")
+
+# Validate command line arguments
+if [ $# -ne 2 ]; then
+    echo "usage: $program_name <assignment> <tests>" >&2
+    exit 1
+fi
+
+assignment="$1"
+tests_file="$2"
+
+# Validate assignment name format (must start with lowercase letter)
+if ! echo "$assignment" | grep -q '^[a-z][a-zA-Z0-9_.]*$'; then
+    echo "$program_name: invalid assignment: $assignment" >&2
+    exit 1
+fi
+
+# Validate tests file pathname format
+if ! echo "$tests_file" | grep -q '^[a-zA-Z0-9_./-]*$'; then
+    echo "$program_name: invalid pathname: $tests_file" >&2
+    exit 1
+fi
+
+# Create main .mygive directory if it doesn't exist
+if [ ! -d ".mygive" ]; then
+    mkdir ".mygive"
+    echo "directory .mygive created"
+fi
+
+# Check if the tests file exists
+if [ ! -f "$tests_file" ]; then
+    echo "$program_name: $tests_file: No such file or directory" >&2
+    exit 1
+fi
+
+# Validate that the tests file is a proper tar archive
+if ! tar -tf "$tests_file" >/dev/null 2>&1; then
+    echo "$program_name: $tests_file: Not a valid tar archive" >&2
+    exit 1
+fi
+
+# Check if assignment already exists to prevent overwriting
+if [ -d ".mygive/$assignment" ]; then
+    echo "$program_name: assignment $assignment already exists" >&2
+    exit 1
+fi
+
+# Create the assignment directory structure
+mkdir ".mygive/$assignment" || {
+    echo "$program_name: failed to create directory .mygive/$assignment" >&2
+    exit 1
+}
+
+# Create subdirectories for submissions and tests
+mkdir ".mygive/$assignment/submissions" || {
+    echo "$program_name: failed to create directory .mygive/$assignment/submissions" >&2
+    exit 1
+}
+mkdir ".mygive/$assignment/tests" || {
+    echo "$program_name: failed to create directory .mygive/$assignment/tests" >&2
+    exit 1
+}
+
+# Copy the tests archive to the assignment directory
+cp "$tests_file" ".mygive/$assignment/tests.tar" || {
+    echo "$program_name: failed to copy $tests_file to .mygive/$assignment/tests.tar" >&2
+    exit 1
+}
+
+# Extract the test files into the tests directory
+(cd ".mygive/$assignment/tests" && tar -xf "../tests.tar") || {
+    echo "$program_name: failed to extract $tests_file" >&2
+    exit 1
+}
+
+echo "assignment $assignment created"

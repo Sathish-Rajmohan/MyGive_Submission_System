@@ -1,0 +1,68 @@
+#!/bin/dash
+
+# mygive-status - Lists all submissions made by a student
+# Shows submission history across all assignments for a given student ID
+# Usage: mygive-status <zid>
+# where <zid> is the student ID (must start with 'z' followed by 7 digits)
+
+program_name=$(basename "$0")
+
+# Validate command line arguments
+if [ $# -ne 1 ]; then
+    echo "usage: $program_name <zid>" >&2
+    exit 1
+fi
+
+zid="$1"
+
+# Validate student ID format (z followed by 7 digits)
+if ! echo "$zid" | grep -q '^z[0-9]\{7\}$'; then
+    echo "$program_name: invalid zid: $zid" >&2
+    exit 1
+fi
+
+# Check if mygive system has been initialized
+if [ ! -d ".mygive" ]; then
+    echo "$program_name: no assignments created" >&2
+    exit 1
+fi
+
+found_submissions=false
+
+# Check all assignments for this student's submissions
+# Process assignments in alphabetical order (excluding reference directory)
+for assignment_dir in $(ls -1 .mygive | grep -v '^\.reference$' | sort); do
+    assignment_path=".mygive/$assignment_dir"
+    
+    # Skip if not a directory
+    if [ ! -d "$assignment_path" ]; then
+        continue
+    fi
+    
+    assignment=$(basename "$assignment_path")
+    student_dir="$assignment_path/submissions/$zid"
+
+    # Check if student has submissions for this assignment
+    if [ -d "$student_dir" ] && [ -f "$student_dir/count" ]; then
+        submission_count=$(cat "$student_dir/count")
+        found_submissions=true
+
+        echo "* $submission_count submissions for $assignment"
+
+        # List metadata for each submission
+        submission_num=1
+        while [ $submission_num -le "$submission_count" ]; do
+            metadata_file="$student_dir/metadata_$submission_num"
+            if [ -f "$metadata_file" ]; then
+                metadata=$(cat "$metadata_file")
+                echo "submission $submission_num: $metadata"
+            fi
+            submission_num=$((submission_num + 1))
+        done
+    fi
+done
+
+# If no submissions found for this student
+if [ "$found_submissions" = false ]; then
+    echo "no submissions for $zid"
+fi

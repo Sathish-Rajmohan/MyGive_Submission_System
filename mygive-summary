@@ -1,0 +1,49 @@
+#!/bin/dash
+
+# mygive-summary - Shows overview of all assignments and submission counts
+# Lists each assignment with the number of students who have made submissions
+# Usage: mygive-summary
+# No arguments required, outputs summary of all assignments in .mygive directory
+
+program_name=$(basename "$0")
+
+# Check if mygive system has been initialized
+if [ ! -d ".mygive" ]; then
+    echo "$program_name: no assignments created" >&2
+    exit 1
+fi
+
+# Check if there are any assignments (excluding reference directory)
+if ! ls -A .mygive 2>/dev/null | grep -qv '^\.reference$'; then
+    exit 0
+fi
+
+# Process all assignments in alphabetical order
+for assignment_dir in $(ls -1 .mygive | grep -v '^\.reference$' | sort); do
+    assignment_path=".mygive/$assignment_dir"
+    
+    # Skip if not a directory
+    if [ ! -d "$assignment_path" ]; then
+        continue
+    fi
+    
+    assignment=$(basename "$assignment_path")
+    student_count=0
+    
+    # Count students who have made submissions for this assignment
+    submissions_dir="$assignment_path/submissions"
+    if [ -d "$submissions_dir" ]; then
+        for student_dir in "$submissions_dir"/*; do
+            if [ -d "$student_dir" ]; then
+                student_count=$((student_count + 1))
+            fi
+        done
+    fi
+    
+    # Display assignment summary with proper grammar
+    if [ "$student_count" -eq 1 ]; then
+        echo "assignment $assignment: submissions from 1 student"
+    else
+        echo "assignment $assignment: submissions from $student_count students"
+    fi
+done

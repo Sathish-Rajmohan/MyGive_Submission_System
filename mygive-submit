@@ -1,0 +1,86 @@
+#!/bin/dash
+
+# mygive-submit - Records a student submission for an assignment
+# Stores the submission file and generates metadata
+# Usage: mygive-submit <assignment> <zid> <filename>
+# where <assignment> is the assignment name, <zid> is the student ID,
+# and <filename> is the file to submit
+
+program_name=$(basename "$0")
+
+# Validate command line arguments
+if [ $# -ne 3 ]; then
+    echo "usage: $program_name <assignment> <zid> <filename>" >&2
+    exit 1
+fi
+
+assignment="$1"
+zid="$2"
+filename="$3"
+
+# Validate assignment name format
+if ! echo "$assignment" | grep -q '^[a-z][a-zA-Z0-9_]*$'; then
+    echo "$program_name: invalid assignment: $assignment" >&2
+    exit 1
+fi
+
+# Validate student ID format (z followed by 7 digits)
+if ! echo "$zid" | grep -q '^z[0-9]\{7\}$'; then
+    echo "$program_name: invalid zid: $zid" >&2
+    exit 1
+fi
+
+# Validate filename format
+if ! echo "$filename" | grep -q '^[a-zA-Z0-9_./-]*$'; then
+    echo "$program_name: invalid filename: $filename" >&2
+    exit 1
+fi
+
+# Check if mygive system has been initialized
+if [ ! -d ".mygive" ]; then
+    echo "$program_name: no assignments created" >&2
+    exit 1
+fi
+
+# Check if the specified assignment exists
+if [ ! -d ".mygive/$assignment" ]; then
+    echo "$program_name: assignment $assignment not found" >&2
+    exit 1
+fi
+
+# Check if the submission file exists
+if [ ! -f "$filename" ]; then
+    echo "$program_name: $filename: No such file or directory" >&2
+    exit 1
+fi
+
+# Create student submission directory if it doesn't exist
+student_dir=".mygive/$assignment/submissions/$zid"
+if [ ! -d "$student_dir" ]; then
+    mkdir -p "$student_dir"
+fi
+
+# Determine the next submission number
+submission_num=1
+if [ -f "$student_dir/count" ]; then
+    submission_num=$(cat "$student_dir/count")
+    submission_num=$((submission_num + 1))
+fi
+
+# Update the submission count
+echo "$submission_num" > "$student_dir/count"
+
+# Store the submission file
+cp "$filename" "$student_dir/submission_$submission_num"
+
+# Generate submission metadata
+file_size=$(wc -c < "$filename")
+current_date=$(date "+%a %b %e %T %Y")  # Format: Wed Mar 15 14:30:25 2023
+base_filename=$(basename "$filename")
+
+# Store metadata for this submission
+metadata="$base_filename $file_size bytes @ $current_date"
+echo "$metadata" > "$student_dir/metadata_$submission_num"
+
+# Confirm successful submission
+echo "Submission accepted - submission $submission_num: $metadata"

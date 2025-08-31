@@ -1,0 +1,302 @@
+#!/bin/dash
+
+# mygive-test - Tests a program against assignment test cases
+# Runs all non-marking tests and reports results with detailed output
+# Usage: mygive-test <assignment> <filename>
+# where <assignment> is the assignment name and <filename> is the program to test
+
+# Function to compare program output with expected results
+compare_output() {
+    expected_file="$1"
+    actual_file="$2"
+    options="$3"
+    
+    # Read files while preserving newlines
+    expected=$(cat "$expected_file" 2>/dev/null || true)
+    actual=$(cat "$actual_file" 2>/dev/null || true)
+    
+    # Apply comparison options based on test configuration
+    if echo "$options" | grep -q 'b'; then
+        # Ignore blank lines
+        expected=$(echo "$expected" | sed '/^$/d')
+        actual=$(echo "$actual" | sed '/^$/d')
+    fi
+    
+    if echo "$options" | grep -q 'c'; then
+        # Ignore case differences
+        expected=$(echo "$expected" | tr '[:upper:]' '[:lower:]')
+        actual=$(echo "$actual" | tr '[:upper:]' '[:lower:]')
+    fi
+    
+    if echo "$options" | grep -q 'd'; then
+        # Only compare digits and newlines
+        expected=$(echo "$expected" | sed 's/[^0-9\n]//g')
+        actual=$(echo "$actual" | sed 's/[^0-9\n]//g')
+    fi
+    
+    if echo "$options" | grep -q 'w'; then
+        # Ignore whitespace differences
+        expected=$(echo "$expected" | tr -d ' \t')
+        actual=$(echo "$actual" | tr -d ' \t')
+    fi
+    
+    # Return success if outputs match
+    [ "$expected" = "$actual" ]
+}
+
+program_name=$(basename "$0")
+
+# Validate command line arguments
+if [ $# -ne 2 ]; then
+    echo "usage: $program_name <assignment> <filename>" >&2
+    exit 1
+fi
+
+assignment="$1"
+filename="$2"
+
+# Validate assignment name format
+if ! echo "$assignment" | grep -q '^[a-z][a-zA-Z0-9_]*$'; then
+    echo "$program_name: invalid assignment: $assignment" >&2
+    exit 1
+fi
+
+# Validate filename format
+if ! echo "$filename" | grep -q '^[a-zA-Z0-9_./-]*$'; then
+    echo "$program_name: invalid filename: $filename" >&2
+    exit 1
+fi
+
+# Check if mygive system exists
+if [ ! -d ".mygive" ]; then
+    echo "$program_name: assignment $assignment not found" >&2
+    exit 1
+fi
+
+# Check if the specified assignment exists
+if [ ! -d ".mygive/$assignment" ]; then
+    echo "$program_name: assignment $assignment not found" >&2
+    exit 1
+fi
+
+# Check if the file to test exists
+if [ ! -f "$filename" ]; then
+    echo "$program_name: $filename: No such file or directory" >&2
+    exit 1
+fi
+
+# Make the file executable (ignore permission errors)
+chmod +x "$filename" 2>/dev/null || true
+
+# Initialize test counters
+tests_passed=0
+tests_failed=0
+
+# Run all non-marking tests in alphabetical order
+for test_dir in $(ls -1 ".mygive/$assignment/tests" | sort); do
+    test_path=".mygive/$assignment/tests/$test_dir"
+    
+    # Skip if not a directory
+    if [ ! -d "$test_path" ]; then
+        continue
+    fi
+    
+    test_name=$(basename "$test_path")
+    
+    # Skip tests that have marks file (these are for marking, not testing)
+    if [ -f "$test_path/marks" ]; then
+        continue
+    fi
+    
+    # Read test configuration files
+    arguments=""
+    if [ -f "$test_path/arguments" ]; then
+        arguments=$(cat "$test_path/arguments")
+    fi
+    
+    stdin_file=""
+    if [ -f "$test_path/stdin" ]; then
+        stdin_file="$test_path/stdin"
+    fi
+    
+    expected_exit_status=0
+    if [ -f "$test_path/exit_status" ]; then
+        expected_exit_status=$(cat "$test_path/exit_status")
+    fi
+    
+    options=""
+    if [ -f "$test_path/options" ]; then
+        options=$(cat "$test_path/options")
+    fi
+    
+    # Create temporary files for capturing output
+    temp_stdout=$(mktemp) || exit 1
+    temp_stderr=$(mktemp) || exit 1
+    temp_expected_stdout=$(mktemp) || exit 1
+    temp_expected_stderr=$(mktemp) || exit 1
+    
+    # Copy expected output files to preserve newlines
+    if [ -f "$test_path/stdout" ]; then
+        cp "$test_path/stdout" "$temp_expected_stdout"
+    else
+        touch "$temp_expected_stdout"
+    fi
+    
+    if [ -f "$test_path/stderr" ]; then
+        cp "$test_path/stderr" "$temp_expected_stderr"
+    else
+        touch "$temp_expected_stderr"
+    fi
+    
+    # Execute the program with test inputs
+    set -- $arguments
+    if [ -n "$stdin_file" ]; then
+        ./"$filename" "$@" < "$stdin_file" > "$temp_stdout" 2> "$temp_stderr"
+    else
+        ./"$filename" "$@" > "$temp_stdout" 2> "$temp_stderr"
+    fi
+    actual_exit_status=$?
+    
+    # Get output byte counts for reporting
+    act_stdout_bytes=$(wc -c < "$temp_stdout")
+    exp_stdout_bytes=$(wc -c < "$temp_expected_stdout")
+    act_stderr_bytes=$(wc -c < "$temp_stderr")
+    exp_stderr_bytes=$(wc -c < "$temp_expected_stderr")
+    
+    # Check if test passed
+    test_passed=true
+    fail_exit_msg=""
+    
+    # Check exit status
+    if [ "$actual_exit_status" -ne "$expected_exit_status" ]; then
+        test_passed=false
+        fail_exit_msg="Exit status of $actual_exit_status incorrect should be $expected_exit_status"
+    fi
+    
+    # Check stdout output
+    stdout_failed=false
+    if ! compare_output "$temp_expected_stdout" "$temp_stdout" "$options"; then
+        test_passed=false
+        stdout_failed=true
+    fi
+    
+    # Check stderr output
+    stderr_failed=false
+    if ! compare_output "$temp_expected_stderr" "$temp_stderr" "$options"; then
+        test_passed=false
+        stderr_failed=true
+    fi
+    
+    # Report test results
+    if [ "$test_passed" = false ]; then
+        echo "* Test $test_name failed."
+        
+        # Show stdout differences if any
+        if [ "$stdout_failed" = true ]; then
+            if [ "$exp_stdout_bytes" -eq 0 ] && [ "$act_stdout_bytes" -gt 0 ]; then
+                echo "--- No stdout expected, these $act_stdout_bytes bytes produced:"
+                cat "$temp_stdout"
+                echo
+            elif [ "$exp_stdout_bytes" -gt 0 ] && [ "$act_stdout_bytes" -eq 0 ]; then
+                echo "--- No stdout produced, these $exp_stdout_bytes bytes expected:"
+                cat "$temp_expected_stdout"
+                echo
+            else
+                echo "--- Incorrect stdout of $act_stdout_bytes bytes:"
+                cat "$temp_stdout"
+                echo
+                
+                # Check for newline issues
+                actual_ends_newline=false
+                expected_ends_newline=false
+                
+                if [ "$act_stdout_bytes" -gt 0 ]; then
+                    last_char=$(tail -c 1 "$temp_stdout" | od -An -tx1 | tr -d ' ')
+                    if [ "$last_char" = "0a" ]; then
+                        actual_ends_newline=true
+                    fi
+                fi
+                
+                if [ "$exp_stdout_bytes" -gt 0 ]; then
+                    last_char=$(tail -c 1 "$temp_expected_stdout" | od -An -tx1 | tr -d ' ')
+                    if [ "$last_char" = "0a" ]; then
+                        expected_ends_newline=true
+                    fi
+                fi
+                
+                # Report newline issues
+                if [ "$actual_ends_newline" = true ] && [ "$expected_ends_newline" = false ]; then
+                    echo "Extra newline at end of stdout"
+                elif [ "$actual_ends_newline" = false ] && [ "$expected_ends_newline" = true ]; then
+                    echo "Missing newline at end of stdout"
+                fi
+                
+                echo "--- Correct stdout is these $exp_stdout_bytes bytes:"
+                cat "$temp_expected_stdout"
+                echo
+            fi
+        fi
+        
+        # Show stderr differences if any
+        if [ "$stderr_failed" = true ]; then
+            if [ "$exp_stderr_bytes" -eq 0 ] && [ "$act_stderr_bytes" -gt 0 ]; then
+                echo "--- No stderr expected, these $act_stderr_bytes bytes produced:"
+                cat "$temp_stderr"
+                echo
+            elif [ "$exp_stderr_bytes" -gt 0 ] && [ "$act_stderr_bytes" -eq 0 ]; then
+                echo "--- No stderr produced, these $exp_stderr_bytes bytes expected:"
+                cat "$temp_expected_stderr"
+                echo
+            else
+                echo "--- Incorrect stderr of $act_stderr_bytes bytes:"
+                cat "$temp_stderr"
+                echo
+                
+                # Check for newline issues in stderr
+                actual_ends_newline=false
+                expected_ends_newline=false
+                
+                if [ "$act_stderr_bytes" -gt 0 ]; then
+                    last_char=$(tail -c 1 "$temp_stderr" | od -An -tx1 | tr -d ' ')
+                    if [ "$last_char" = "0a" ]; then
+                        actual_ends_newline=true
+                    fi
+                fi
+                
+                if [ "$exp_stderr_bytes" -gt 0 ]; then
+                    last_char=$(tail -c 1 "$temp_expected_stderr" | od -An -tx1 | tr -d ' ')
+                    if [ "$last_char" = "0a" ]; then
+                        expected_ends_newline=true
+                    fi
+                fi
+                
+                # Report stderr newline issues
+                if [ "$actual_ends_newline" = true ] && [ "$expected_ends_newline" = false ]; then
+                    echo "Extra newline at end of stderr"
+                elif [ "$actual_ends_newline" = false ] && [ "$expected_ends_newline" = true ]; then
+                    echo "Missing newline at end of stderr"
+                fi
+                
+                echo "--- Correct stderr is these $exp_stderr_bytes bytes:"
+                cat "$temp_expected_stderr"
+                echo
+            fi
+        fi
+        
+        # Show exit status error if applicable
+        if [ -n "$fail_exit_msg" ]; then
+            echo "$fail_exit_msg"
+        fi
+        
+        tests_failed=$((tests_failed + 1))
+    else
+        echo "* Test $test_name passed."
+        tests_passed=$((tests_passed + 1))
+    fi
+    
+    # Clean up temporary files
+    rm -f "$temp_stdout" "$temp_stderr" "$temp_expected_stdout" "$temp_expected_stderr"
+done
+
+# Print final test summary
+echo "** $tests_passed tests passed, $tests_failed tests failed"
